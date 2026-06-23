@@ -1,0 +1,17 @@
+.claude
+__pycache__
+web_work
+files
+ppt_assets
+dist
+build
+*.exe
+*.spec
+*.pdf
+*.dxf
+*.jww
+*.log
+*.tmp
+*.bak
+_backup_*
+配布用_*

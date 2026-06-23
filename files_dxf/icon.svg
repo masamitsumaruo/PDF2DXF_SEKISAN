@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3CC15A"/>
+      <stop offset="0.5" stop-color="#23B6A4"/>
+      <stop offset="1" stop-color="#2A7FF6"/>
+    </linearGradient>
+    <clipPath id="round">
+      <rect x="0" y="0" width="512" height="512" rx="112" ry="112"/>
+    </clipPath>
+  </defs>
+
+  <!-- 背景（角丸＋グラデーション＋スウォッシュ） -->
+  <g clip-path="url(#round)">
+    <rect x="0" y="0" width="512" height="512" fill="url(#bg)"/>
+    <polygon points="512,150 512,330 150,512 -40,512" fill="#ffffff" opacity="0.10"/>
+    <polygon points="512,40 512,150 90,512 -10,512" fill="#1f86f0" opacity="0.18"/>
+  </g>
+
+  <!-- 書類（白・角丸・右上の折れ角） -->
+  <path d="M124 96
+           h208 l56 56
+           v264
+           a24 24 0 0 1 -24 24
+           h-216
+           a24 24 0 0 1 -24 -24
+           v-296
+           a24 24 0 0 1 24 -24 z"
+        fill="#ffffff"/>
+  <!-- 折れ角（フラップ） -->
+  <path d="M332 96 v56 h56 z" fill="#cfe8e0"/>
+
+  <!-- DXF 文字 -->
+  <text x="256" y="252" text-anchor="middle"
+        font-family="Arial, 'Helvetica Neue', Helvetica, sans-serif"
+        font-weight="800" font-size="128" letter-spacing="2"
+        fill="#0F5132">DXF</text>
+
+  <!-- 十字（ターゲット）マーク -->
+  <g stroke="#2E8B3D" stroke-width="13" stroke-linecap="round" fill="none">
+    <line x1="256" y1="252" x2="256" y2="436"/>
+    <line x1="164" y1="344" x2="348" y2="344"/>
+    <circle cx="256" cy="344" r="58"/>
+  </g>
+  <rect x="234" y="322" width="44" height="44" fill="#F5A623"/>
+</svg>
