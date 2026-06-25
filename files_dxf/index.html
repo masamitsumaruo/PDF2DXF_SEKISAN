@@ -818,6 +818,8 @@ function drawArc(e){
 }
 function drawText(e){
   if(!e.text) return;
+  // 周長面積・赤単線ラベルは画面固定サイズ（ズーム非依存）でオーバーレイ描画する（drawFixedLabels）
+  if(e.measureLabel || e.singleLineLabel) return;
   const [sx,sy]=w2s(e.x1,e.y1);
   const h = (e.sy||e.sx||3) * view.scale;             // 文字高さ(px)
   if(h<3) return;                                     // 小さすぎは省略
@@ -904,6 +906,7 @@ function updHud(){
    寸法記入・スナップ・オーバーレイ
    ============================================================ */
 const DIM_TEXT_PX = 14;  // 寸法値の文字高さ（画面px固定。DXFは実寸座標のためズーム非依存）
+const LABEL_TEXT_PX = 17; // 周長面積・赤単線ラベルの文字高さ（画面px固定・ズーム非依存。寸法より少し大きめ）
 
 // 計測距離（図面単位）→ 実寸（縮尺分母を乗算）をカンマ区切り整数で
 function fmtLen(paperLen){ return Math.round(paperLen*scaleDenom).toLocaleString('en-US'); }
@@ -1080,6 +1083,50 @@ function drawUserLine(line, preview){
   octx.beginPath(); octx.moveTo(A[0],A[1]); octx.lineTo(B[0],B[1]); octx.stroke();
   octx.restore();
 }
+// 周長面積・赤単線ラベルを「画面px固定サイズ（ズーム非依存）」で描くための各文字の画面ジオメトリ。
+// 描画(drawFixedLabels)とヒット判定(textHitAt)で同一ロジックを共有する。
+function fixedLabelItems(){
+  if(!DOC) return [];
+  const dpr=cv.width/cv.getBoundingClientRect().width;
+  const P=LABEL_TEXT_PX*dpr;            // 文字高さ(canvas px・ズーム非依存)
+  const items=[];
+  // 赤単線ラベル（1行・配置は実寸座標x1,y1に追従、サイズのみ固定）
+  DOC.moji.forEach(e=>{
+    if(!e.singleLineLabel || !vis(e) || !e.text) return;
+    const [sx,sy]=w2s(e.x1,e.y1);
+    items.push({text:e.text, sx, sy, h:P, halign:e.halign||0, kind:'single', ent:e});
+  });
+  // 周長面積ラベル（中心 center を基準に2行を画面pxで配置）
+  if(!hiddenLayers.has(MOJI_LAYER)){
+    const rg=P*0.8, labelDX=P*2.8, valDX=P*1.45;
+    measureLabels.forEach(ml=>{
+      const [cx,cy]=w2s(ml.center.x, ml.center.y);
+      items.push({text:'周長',        sx:cx-labelDX, sy:cy-rg, h:P, halign:0, kind:'measure', measureRef:ml});
+      items.push({text:ml.lengthQty,  sx:cx+valDX,   sy:cy-rg, h:P, halign:2, kind:'measure', measureRef:ml});
+      items.push({text:'面積',        sx:cx-labelDX, sy:cy+rg, h:P, halign:0, kind:'measure', measureRef:ml});
+      items.push({text:ml.areaQty,    sx:cx+valDX,   sy:cy+rg, h:P, halign:2, kind:'measure', measureRef:ml});
+    });
+  }
+  return items;
+}
+function drawFixedLabels(){
+  const items=fixedLabelItems();
+  if(!items.length) return;
+  const fam='"Yu Gothic","Meiryo",sans-serif';
+  const singleCol=rgbCss(LINE_COLOR), measureCol=rgbCss(MOJI_COLOR);
+  octx.save(); octx.setLineDash([]); octx.globalAlpha=1; octx.lineJoin='round';
+  items.forEach(it=>{
+    octx.font=it.h.toFixed(1)+'px '+fam;
+    octx.textAlign=(it.halign===2)?'right':(it.halign===1?'center':'left');
+    octx.textBaseline='middle';
+    octx.lineWidth=Math.max(1, it.h*0.16);
+    octx.strokeStyle=darkBg?'rgba(11,15,20,.85)':'rgba(247,248,250,.92)';
+    octx.strokeText(it.text, it.sx, it.sy);   // 背景縁取りで可読性確保
+    octx.fillStyle=(it.kind==='single')?singleCol:measureCol;
+    octx.fillText(it.text, it.sx, it.sy);
+  });
+  octx.restore();
+}
 function drawOverlay(){
   if(!ov) return;
   octx.setTransform(1,0,0,1,0,0);
@@ -1088,6 +1135,7 @@ function drawOverlay(){
   const dpr=cv.width/cv.getBoundingClientRect().width;
   octx.lineCap='round'; octx.lineJoin='round';
   dims.forEach(d=>drawDim(d,false));
+  drawFixedLabels();   // 周長面積・赤単線ラベル（画面固定サイズ）
   if(toolMode && hover){
     if((toolMode==='line'||toolMode==='single-line') && pend.length===1 && hover.snapped) drawUserLine({p1:pend[0],p2:hover}, true);
     else if(pend.length===1) drawBaseline(pend[0], hover);                    // 両端を決める仮線
@@ -1212,6 +1260,19 @@ function handleTextMoveClick(px,py){
     return;
   }
   const [wx,wy]=[(px-view.ox)/view.scale, (view.oy-py)/view.scale];
+  // 周長面積ラベルはブロック全体（中心 center）を移動し、出力用エンティティも同期
+  if(textMoveTarget.measureRef){
+    const ml=textMoveTarget.measureRef;
+    const dx=wx-ml.center.x, dy=wy-ml.center.y;
+    actionHistory.push({type:'measure-move', measureRef:ml, dx, dy});
+    ml.center={x:wx, y:wy};
+    (ml.entities||[]).forEach(en=>{ en.x1+=dx; en.y1+=dy; });
+    setHud('テキストを移動しました');
+    textMoveTarget=null;
+    bbox=computeBBox(DOC);
+    draw();
+    return;
+  }
   const isAnnot=!!(textMoveTarget.singleLineLabel||textMoveTarget.measureLabel);
   actionHistory.push({type:'text-move', ent:textMoveTarget, oldX:textMoveTarget.x1, oldY:textMoveTarget.y1, oldHA:textMoveTarget.halign, oldVA:textMoveTarget.valign});
   if(isAnnot){ textMoveTarget.halign=0; textMoveTarget.valign=0; }
@@ -1444,6 +1505,7 @@ function textHitAt(px,py){
   for(let i=DOC.moji.length-1;i>=0;i--){
     const e=DOC.moji[i];
     if(!vis(e) || !e.text) continue;
+    if(e.measureLabel || e.singleLineLabel) continue;   // 固定サイズラベルは画面座標で別途判定
     const [sx,sy]=w2s(e.x1,e.y1);
     const h=(e.sy||e.sx||3)*view.scale;
     if(h<3) continue;
@@ -1467,6 +1529,25 @@ function textHitAt(px,py){
     else if(va===2 || ha===4){ y0=-h/2; y1=h/2; }
     else if(va===3){ y0=0; y1=h; }
     if(lx>=x0-pad && lx<=x1+pad && ly>=y0-pad && ly<=y1+pad) return e;
+  }
+  // 周長面積・赤単線の固定サイズラベル（画面px基準でヒット判定）
+  {
+    const items=fixedLabelItems();
+    const padF=8*dpr;
+    for(let i=items.length-1;i>=0;i--){
+      const it=items[i];
+      octx.save(); octx.font=it.h.toFixed(1)+'px "Yu Gothic","Meiryo",sans-serif';
+      const tw=octx.measureText(it.text).width; octx.restore();
+      let x0,x1;
+      if(it.halign===2){ x0=it.sx-tw; x1=it.sx; }
+      else if(it.halign===1){ x0=it.sx-tw/2; x1=it.sx+tw/2; }
+      else { x0=it.sx; x1=it.sx+tw; }
+      const y0=it.sy-it.h/2, y1=it.sy+it.h/2;   // valign middle
+      if(px>=x0-padF && px<=x1+padF && py>=y0-padF && py<=y1+padF){
+        if(it.kind==='single') return it.ent;   // テキスト移動はエンティティを直接移動
+        return {text:it.text, x1:it.measureRef.center.x, y1:it.measureRef.center.y, measureRef:it.measureRef};
+      }
+    }
   }
   // dims[]のテキストもチェック（overlay上の寸法値をクリックでExcel転記）
   const dpr2=cv.width/cv.getBoundingClientRect().width;
@@ -1588,6 +1669,11 @@ function undoLastAction(){
     act.ent.x1=act.oldX; act.ent.y1=act.oldY;
     if(act.oldHA!==undefined) act.ent.halign=act.oldHA;
     if(act.oldVA!==undefined) act.ent.valign=act.oldVA;
+    if(DOC) bbox=computeBBox(DOC);
+  }else if(act && act.type==='measure-move' && act.measureRef){
+    const ml=act.measureRef;
+    ml.center={x:ml.center.x-act.dx, y:ml.center.y-act.dy};
+    (ml.entities||[]).forEach(en=>{ en.x1-=act.dx; en.y1-=act.dy; });
     if(DOC) bbox=computeBBox(DOC);
   }else if(act && act.type==='dim' && dims.length){
     const rd=dims.pop();
