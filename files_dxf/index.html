@@ -819,7 +819,7 @@ function drawArc(e){
 function drawText(e){
   if(!e.text) return;
   const [sx,sy]=w2s(e.x1,e.y1);
-  const h = (e.sy||e.sx||3) * view.scale;             // 文字高さ(px)
+  const h = (e.sy||e.sx||3) * view.scale;             // 文字高さ(px)＝実寸×ズーム（寸法値と連動）
   if(h<3) return;                                     // 小さすぎは省略
   const ang = -((e.kakudo||0) * Math.PI/180);         // 画面はY下向き
   ctx.save();
@@ -903,7 +903,28 @@ function updHud(){
 /* ============================================================
    寸法記入・スナップ・オーバーレイ
    ============================================================ */
-const DIM_TEXT_PX = 14;  // 寸法値の文字高さ（画面px固定。DXFは実寸座標のためズーム非依存）
+const DIM_TEXT_PX = 14;  // 寸法値の文字高さ（寸法数値が未検出のときの予備：画面px固定）
+
+// PDF→DXFで取り込んだPDF図面の「寸法の数値」の文字高さ（実寸mm）。0=未検出。
+// 寸法線・赤線・周長面積のテキストはこの値(h)を実寸高さとして配置し、寸法値と完全連動させる
+// （ズームすると寸法値と一緒に拡大・縮小＝常に寸法値と同じ大きさ）。
+let dimTextH = 0;
+
+// PDF図面の寸法数値（PDF-DIMレイヤ＝add_dimension_texts/labelsが出力）の代表文字高さを求める。
+// 数値を含むテキストの実寸高さ(sy)の中央値を採用。見つからなければ0を返す。
+function detectDimTextHeight(d){
+  if(!d || !d.moji) return 0;
+  const hs=[];
+  for(const e of d.moji){
+    if(e.layer!=='PDF-DIM' || !e.text) continue;
+    if(!/[0-9０-９]/.test(e.text)) continue;   // 数値（寸法値）のみ対象
+    const h=e.sy||e.sx||0;
+    if(h>0) hs.push(h);
+  }
+  if(!hs.length) return 0;
+  hs.sort((a,b)=>a-b);
+  return hs[Math.floor(hs.length/2)];          // 中央値（外れ値に強い）
+}
 
 // 計測距離（図面単位）→ 実寸（縮尺分母を乗算）をカンマ区切り整数で
 function fmtLen(paperLen){ return Math.round(paperLen*scaleDenom).toLocaleString('en-US'); }
@@ -1014,7 +1035,8 @@ function drawDimText(d,a,b,col){
   let ang=Math.atan2(B[1]-A[1],B[0]-A[0]);
   if(ang>Math.PI/2) ang-=Math.PI; if(ang<-Math.PI/2) ang+=Math.PI;   // 文字を常に正立
   const dpr = cv.width / cv.getBoundingClientRect().width;
-  const h = DIM_TEXT_PX * dpr;                                       // 画面固定の文字高さ（ズーム非依存）
+  // 文字高さ＝寸法値の高さ(h)に連動（実寸×ズーム）。寸法数値が未検出のときのみ画面固定。
+  const h = dimTextH>0 ? dimTextH*view.scale : DIM_TEXT_PX*dpr;
   const gap = h*0.45;
   octx.save(); octx.translate(mx,my); octx.rotate(ang);
   octx.font = h.toFixed(1)+'px '+(getCss('--mono')||'monospace');
@@ -1255,7 +1277,10 @@ function addSingleLineLabel(p1,p2){
   const text=formatMeters(meters);
   const cx=(p1.x+p2.x)/2, cy=(p1.y+p2.y)/2;
   const bbW=bbox?bbox.maxX-bbox.minX:1, bbH=bbox?bbox.maxY-bbox.minY:1;
-  const textH=Math.max(60, Math.min(200, Math.min(bbW,bbH)*0.035||90)), gap=textH*0.8;
+  // 文字高さ＝寸法数値の高さ(h)。実寸座標で配置し、寸法値と完全連動（ズームで一緒に拡縮）。
+  // 寸法数値が未検出のときのみ従来のbboxヒューリスティック。
+  const textH = dimTextH>0 ? dimTextH : Math.max(60, Math.min(200, Math.min(bbW,bbH)*0.035||90));
+  const gap=textH*0.8;
   const isHorz=Math.abs(dx)>=Math.abs(dy);
   const tx=isHorz?cx:cx-gap, ty=isHorz?cy+gap:cy;
   if(!DOC.usedLayers) DOC.usedLayers={};
@@ -1418,7 +1443,8 @@ function calcSekisanMeasures(){
   clearMeasureLabels();
   const polys=detectClosedSekisanPolygons();
   polys.forEach(p=>{
-    const h=labelTextSize(p.poly);
+    // 文字高さ＝寸法数値の高さ(h)。実寸座標で配置し寸法値と完全連動。未検出時のみ多角形比例。
+    const h = dimTextH>0 ? dimTextH : labelTextSize(p.poly);
     const cx=p.center.x, cy=p.center.y;
     const lengthQty=formatMeasure(p.perim/1000);
     const areaQty=formatMeasure(p.area/1000000);
@@ -1470,7 +1496,8 @@ function textHitAt(px,py){
   }
   // dims[]のテキストもチェック（overlay上の寸法値をクリックでExcel転記）
   const dpr2=cv.width/cv.getBoundingClientRect().width;
-  const dimH=DIM_TEXT_PX*dpr2, dimPad=8*dpr2;
+  // 描画(drawDimText)と同じ高さ算出：寸法値連動（実寸×ズーム）。未検出時のみ画面固定。
+  const dimH=dimTextH>0 ? dimTextH*view.scale : DIM_TEXT_PX*dpr2, dimPad=8*dpr2;
   for(let i=dims.length-1;i>=0;i--){
     const d=dims[i]; let da,db;
     if(d.mode==='xy'){
@@ -1756,6 +1783,7 @@ function handleBuffer(buf, name){
     document.getElementById('btn-dim-diag').classList.remove('on');
     cv.style.cursor='default';
     scaleDenom = detectScale(DOC);                       // 縮尺を自動検出
+    dimTextH = detectDimTextHeight(DOC);                 // 寸法数値の文字高さ(h)を取得
     document.getElementById('dim-scale').value = scaleDenom;
     buildSnap(DOC); updReadout();
     resize(); fit();
@@ -2012,10 +2040,10 @@ function buildDimDxfRecords(nl){
     rec.push(['0','LINE','8',SUNPOU_LAYER,'62',SUNPOU_ACI,'6','CONTINUOUS',
       '10',dxfNum(a.x),'20',dxfNum(a.y),'30','0.0',
       '11',dxfNum(b.x),'21',dxfNum(b.y),'31','0.0'].join(nl));
-    // 寸法値テキスト（高さは水平・縦共通で固定）
+    // 寸法値テキスト（高さは寸法数値の高さ(h)に合わせる。未検出時のみ従来固定200）
     const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
     const ang=Math.atan2(b.y-a.y, b.x-a.x)*180/Math.PI;
-    const textH=200;
+    const textH=dimTextH>0 ? dimTextH : 200;
     rec.push(['0','TEXT','8',SUNPOU_LAYER,'62',SUNPOU_ACI,'7','Gothic',
       '10',dxfNum(mx),'20',dxfNum(my),'30','0.0',
       '40',dxfNum(textH),
@@ -2034,7 +2062,7 @@ function buildSingleLineLabelDxfRecords(nl){
   labels.forEach(e=>{
     rec.push(['0','TEXT','8',LINE_LAYER,'62',LINE_ACI,'7','Gothic',
       '10',dxfNum(e.x1),'20',dxfNum(e.y1),'30','0.0',
-      '40','100','1',e.text,'50',dxfNum(e.kakudo||0),
+      '40',dxfNum(e.sy||100),'1',e.text,'50',dxfNum(e.kakudo||0),
       '72',String(e.halign==null?1:e.halign),'73','2',
       '11',dxfNum(e.x1),'21',dxfNum(e.y1),'31','0.0'].join(nl));
   });
