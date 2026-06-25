@@ -67,4 +67,5 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     icon=os.path.join(ROOT, 'files_dxf', 'favicon.ico'),
+    version=os.path.join(ROOT, 'version_info.txt'),  # アプリ名・発行元等のバージョン情報を埋め込む
 )

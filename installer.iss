@@ -10,7 +10,7 @@
 
 #define MyAppName "PDF2DXF 積算"
 #define MyAppExeName "PDF2DXF_SEKISAN.exe"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 ; ↓ 発行元・URL は必要に応じて編集してください
 #define MyAppPublisher "PDF2DXF_SEKISAN"
 #define MyAppURL ""
@@ -37,6 +37,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Program Files へ入れるため管理者権限を要求（標準的な挙動）
 PrivilegesRequired=admin
+; setup.exe 自身にもバージョン情報（発行元・製品名）を埋め込み、プロパティに正規情報を表示
+VersionInfoVersion={#MyAppVersion}.0
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoDescription={#MyAppName} セットアップ
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
