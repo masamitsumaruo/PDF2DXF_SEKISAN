@@ -4,8 +4,8 @@
 # コード署名が必要だが、表示情報の改善とSmartScreenの評価蓄積に寄与する）。
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 3, 0),
-    prodvers=(1, 0, 3, 0),
+    filevers=(1, 0, 4, 0),
+    prodvers=(1, 0, 4, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -20,12 +20,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'PDF2DXF_SEKISAN'),
           StringStruct('FileDescription', 'PDF2DXF 積算'),
-          StringStruct('FileVersion', '1.0.3.0'),
+          StringStruct('FileVersion', '1.0.4.0'),
           StringStruct('InternalName', 'PDF2DXF_SEKISAN'),
           StringStruct('LegalCopyright', '(c) PDF2DXF_SEKISAN'),
           StringStruct('OriginalFilename', 'PDF2DXF_SEKISAN.exe'),
           StringStruct('ProductName', 'PDF2DXF 積算'),
-          StringStruct('ProductVersion', '1.0.3.0')
+          StringStruct('ProductVersion', '1.0.4.0')
         ]
       )
     ]),

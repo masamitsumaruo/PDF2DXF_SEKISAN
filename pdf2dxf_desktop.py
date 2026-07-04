@@ -3,17 +3,53 @@
 
 import base64
 import os
+import socket
 import threading
+import time
+import urllib.request
 import webview
 from web_pdf2dxf_app import app, ensure_dirs
 
-PORT = 5055
+
+def _find_free_port(preferred: int = 5055) -> int:
+    """空いているポートを返す。
+
+    前回のプロセスが異常終了してポート5055を握ったままだと、次回起動時に
+    Flaskがバインドできず「白い画面のまま固まる」事象になるため、
+    5055が使えない場合は近くの空きポートへ自動退避する。
+    （ビューアのExcel連携は同一オリジン相対パスを優先するためポートが変わっても動く）
+    """
+    for port in (preferred, *range(preferred + 1, preferred + 26)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    # 全て塞がっている場合はOSに任せて一時ポートを取る
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+PORT = _find_free_port()
 
 
 def start_server():
     ensure_dirs()
     # threaded=True: シェル画面・ビューア(iframe)・Excel API の同時アクセスを捌けるようにする。
     app.run(host="127.0.0.1", port=PORT, debug=False, use_reloader=False, threaded=True)
+
+
+def _wait_server_ready(timeout_sec: float = 15.0) -> None:
+    """ウィンドウを開く前にサーバーの応答を待つ（起動直後の読み込み失敗・白画面を防ぐ）。"""
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/", timeout=2):
+                return
+        except Exception:  # noqa: BLE001
+            time.sleep(0.3)
 
 
 class Api:
@@ -81,6 +117,7 @@ def _force_quit(*_args):
 if __name__ == "__main__":
     t = threading.Thread(target=start_server, daemon=True)
     t.start()
+    _wait_server_ready()
     api = Api()
     window = webview.create_window(
         "PDF→DXF 積算",

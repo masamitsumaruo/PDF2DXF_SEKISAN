@@ -10,7 +10,7 @@
 
 #define MyAppName "PDF2DXF 積算"
 #define MyAppExeName "PDF2DXF_SEKISAN.exe"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 ; ↓ 発行元・URL は必要に応じて編集してください
 #define MyAppPublisher "PDF2DXF_SEKISAN"
 #define MyAppURL ""
