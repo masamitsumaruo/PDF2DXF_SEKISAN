@@ -311,7 +311,10 @@ convertBtn.addEventListener('click', async ()=>{
     form.append('scale_x', scaleX.value || '');
     form.append('scale_y', scaleY.value || '');
     const res=await fetch('/api/convert', {method:'POST', body:form});
-    const data=await res.json();
+    if(res.status===413) throw new Error('PDFが大きすぎます（Web版は約4.5MBまで）。ローカル版をご利用ください。');
+    let data;
+    try{ data=await res.json(); }
+    catch(_){ throw new Error('サーバー応答エラー（'+res.status+'）。処理時間の超過またはファイルサイズ超過の可能性があります。'); }
     if(!res.ok || !data.ok) throw new Error(data.error || '変換に失敗しました。');
     if(data.scale_x) scaleX.value=data.scale_x;
     if(data.scale_y) scaleY.value=data.scale_y;
@@ -319,7 +322,7 @@ convertBtn.addEventListener('click', async ()=>{
     lastDxfName=data.output_name;
     viewer.src='/viewer/';
     viewerTitle.textContent=data.output_name;
-    setStatus(data.message);
+    setStatus(data.message + ((data.logs&&data.logs.length) ? '\n'+data.logs.join('\n') : ''));
   }catch(ex){
     setStatus(ex.message, true);
   }finally{
@@ -452,7 +455,10 @@ def api_convert():
 
     logs: list[str] = []
     try:
-        page = int(request.form.get("page", "1") or "1")
+        try:
+            page = int(request.form.get("page", "1") or "1")
+        except ValueError:
+            return jsonify({"ok": False, "error": "ページ番号は整数で入力してください。"}), 400
         auto_scale = request.form.get("auto_scale", "1") == "1"
         ocr_fallback = request.form.get("ocr", "0") == "1"
         if ocr_fallback and os.environ.get("VERCEL"):
