@@ -1831,6 +1831,17 @@ fileInput.addEventListener('change',e=>{ if(e.target.files[0]) readFile(e.target
 ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
 ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot');}));
 drop.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) readFile(f); });
+// 画面のどこにドロップしても受け付ける。DXFはこの場で開き、
+// PDF等は親ページ（PDF2DXFシェル）に転送して変換フローに乗せる。
+window.addEventListener('dragover',e=>{ e.preventDefault(); });
+window.addEventListener('drop',e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0]; if(!f) return;
+  const n=(f.name||'').toLowerCase();
+  if(n.endsWith('.dxf')) readFile(f);
+  else if(window.parent!==window) window.parent.postMessage({type:'file-dropped', file:f}, location.origin);
+  else setHud('DXFファイルをドロップしてください');
+});
 
 document.getElementById('btn-fit').onclick=fit;
 // ---- 表示範囲の記憶 ----

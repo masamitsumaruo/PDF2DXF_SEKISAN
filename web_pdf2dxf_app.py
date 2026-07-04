@@ -252,6 +252,25 @@ fileInput.addEventListener('change', e=>pickFile(e.target.files[0]));
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot');}));
 drop.addEventListener('drop', e=>pickFile(e.dataTransfer.files[0]));
+// 画面のどこにドロップしてもファイルを受け付ける（従来は左の小さな枠のみで、
+// それ以外の場所にドロップすると何も起きなかった）
+function acceptDropped(f){
+  if(!f) return;
+  const n=(f.name||'').toLowerCase();
+  if(n.endsWith('.pdf')||n.endsWith('.dxf')) pickFile(f);
+  else setStatus('PDFまたはDXFファイルをドロップしてください。', true);
+}
+window.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('hot'); });
+window.addEventListener('dragleave', e=>{ if(!e.relatedTarget) drop.classList.remove('hot'); });
+window.addEventListener('drop', e=>{
+  e.preventDefault(); drop.classList.remove('hot');
+  acceptDropped(e.dataTransfer.files[0]);
+});
+// ビューア(iframe)の上にドロップされたファイルはビューアから転送されてくる
+window.addEventListener('message', ev=>{
+  if(ev.origin!==location.origin) return;
+  if(ev.data && ev.data.type==='file-dropped' && ev.data.file) acceptDropped(ev.data.file);
+});
 function evalScale(s){
   s=(s||'').trim();
   if(!s) return null;
@@ -322,7 +341,7 @@ convertBtn.addEventListener('click', async ()=>{
     lastDxfName=data.output_name;
     viewer.src='/viewer/';
     viewerTitle.textContent=data.output_name;
-    setStatus(data.message + ((data.logs&&data.logs.length) ? '\n'+data.logs.join('\n') : ''));
+    setStatus(data.message + ((data.logs&&data.logs.length) ? '\\n'+data.logs.join('\\n') : ''));
   }catch(ex){
     setStatus(ex.message, true);
   }finally{
