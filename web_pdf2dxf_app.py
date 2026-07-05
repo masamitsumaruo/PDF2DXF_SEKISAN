@@ -567,7 +567,9 @@ def _import_excel_com():
     """Excel連携に必要な pywin32 を読み込む。未導入なら分かりやすい RuntimeError。"""
     try:
         import pythoncom
+        import pywintypes  # noqa: F401  ProgID→CLSID解決に使用
         import win32com.client
+        import win32com.client.dynamic  # noqa: F401  frozen EXEでの取りこぼし防止＋動的接続用
 
         return pythoncom, win32com.client
     except Exception as exc:  # noqa: BLE001
@@ -577,18 +579,61 @@ def _import_excel_com():
         ) from exc
 
 
-def _get_excel(win32):
-    """起動中のExcelに接続する。無ければ分かりやすい RuntimeError を送出する。
+# Excelブックとして扱う拡張子（ROTフォールバック用）
+_EXCEL_BOOK_EXTS = (".xls", ".xlsx", ".xlsm", ".xlsb", ".xltx", ".xltm", ".csv")
 
-    勝手に空のExcelを起動して数値を書き込むと事故のもとなので、ここでは接続のみ行う。
+
+def _get_excel(win32):
+    """起動中のExcelに『動的ディスパッチ』で接続する（gencache非依存）。
+
+    以前は win32.GetActiveObject("Excel.Application") を使っていたが、これは内部で
+    gencache（%TEMP%\\gen_py の型キャッシュ）を経由するため、キャッシュが壊れると
+    Excelを開いていても "起動中のExcelが見つかりません" になり転記できなくなる事象があった。
+    ここでは gencache を一切使わない dynamic.Dispatch のみで接続し、
+    さらに失敗時は ROT（実行中オブジェクトテーブル）を走査して、開いているブックから
+    Application を取得するフォールバックを行う。勝手に空のExcelは起動しない（接続のみ）。
     """
+    import pythoncom
+    import pywintypes
+    from win32com.client import dynamic
+
+    def _as_dispatch(unknown):
+        # GetActiveObject/ROT は IUnknown を返すため、IDispatch へ変換してから
+        # 動的ラッパー化する（gencache は経由しない）。
+        return dynamic.Dispatch(unknown.QueryInterface(pythoncom.IID_IDispatch))
+
+    # 1) 主経路: Excel.ApplicationのCLSIDを直接掴む（gencache不使用）
     try:
-        return win32.GetActiveObject("Excel.Application")
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "起動中のExcelが見つかりません。Excelを開き、"
-            "転記先のセルを選択してから、もう一度お試しください。"
-        ) from exc
+        clsid = pywintypes.IID("Excel.Application")
+        return _as_dispatch(pythoncom.GetActiveObject(clsid))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) フォールバック: ROTを走査し、開いているExcelブックのmonikerからApplicationを得る
+    try:
+        rot = pythoncom.GetRunningObjectTable()
+        ctx = pythoncom.CreateBindCtx(0)
+        for moniker in rot.EnumRunning():
+            try:
+                name = moniker.GetDisplayName(ctx, None)
+            except Exception:  # noqa: BLE001
+                continue
+            if not name or not name.lower().endswith(_EXCEL_BOOK_EXTS):
+                continue
+            try:
+                book = _as_dispatch(rot.GetObject(moniker))
+                app = book.Application
+                if app is not None:
+                    return app
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+
+    raise RuntimeError(
+        "起動中のExcelが見つかりません。Excelを開き、"
+        "転記先のセルを選択してから、もう一度お試しください。"
+    )
 
 
 @app.route("/api/excel/ping", methods=["GET", "POST", "OPTIONS"])
