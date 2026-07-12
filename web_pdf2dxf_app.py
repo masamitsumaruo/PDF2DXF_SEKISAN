@@ -26,13 +26,25 @@ def _app_root() -> Path:
         return Path(_sys._MEIPASS)
     return Path(__file__).resolve().parent
 
+def _is_cloud() -> bool:
+    """Vercel/Render などのクラウド環境か判定する。
+
+    クラウドでは OCR（rapidocr/easyocr/torch）や Excel 連携（pywin32）の
+    依存を入れていないため、これらの機能は自動で無効化する。
+    Render は環境変数 RENDER を、Vercel は VERCEL を自動で設定する。
+    """
+    return bool(os.environ.get("VERCEL") or os.environ.get("RENDER"))
+
+
 ROOT = _app_root()
 VIEWER_DIR = ROOT / "files_dxf"
-WORK_DIR = Path(os.environ.get("PDF2DXF_WORK_DIR") or (Path(tempfile.gettempdir()) / "pdf2dxf_web" if os.environ.get("VERCEL") else ROOT / "web_work"))
+WORK_DIR = Path(os.environ.get("PDF2DXF_WORK_DIR") or (Path(tempfile.gettempdir()) / "pdf2dxf_web" if _is_cloud() else ROOT / "web_work"))
 JOB_DIR = WORK_DIR / "jobs"
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+# アップロード上限。既定200MB。環境変数 MAX_UPLOAD_MB で変更できる（Render では render.yaml で指定）。
+_MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "200"))
+app.config["MAX_CONTENT_LENGTH"] = _MAX_UPLOAD_MB * 1024 * 1024
 
 
 @app.after_request
@@ -330,7 +342,7 @@ convertBtn.addEventListener('click', async ()=>{
     form.append('scale_x', scaleX.value || '');
     form.append('scale_y', scaleY.value || '');
     const res=await fetch('/api/convert', {method:'POST', body:form});
-    if(res.status===413) throw new Error('PDFが大きすぎます（Web版は約4.5MBまで）。ローカル版をご利用ください。');
+    if(res.status===413) throw new Error('PDFが大きすぎます（アップロード上限を超えています）。分割するか、ローカル版をご利用ください。');
     let data;
     try{ data=await res.json(); }
     catch(_){ throw new Error('サーバー応答エラー（'+res.status+'）。処理時間の超過またはファイルサイズ超過の可能性があります。'); }
@@ -480,7 +492,7 @@ def api_convert():
             return jsonify({"ok": False, "error": "ページ番号は整数で入力してください。"}), 400
         auto_scale = request.form.get("auto_scale", "1") == "1"
         ocr_fallback = request.form.get("ocr", "0") == "1"
-        if ocr_fallback and os.environ.get("VERCEL"):
+        if ocr_fallback and _is_cloud():
             ocr_fallback = False
             logs.append("OCR補完はローカル版のみ対応のためスキップしました。")
         manual_scale_x = None
@@ -641,7 +653,7 @@ def api_excel_ping():
     """Excel転記モードの事前チェック。サーバー稼働とExcel接続状況を返す。"""
     if request.method == "OPTIONS":
         return Response(status=204)
-    if os.environ.get("VERCEL"):
+    if _is_cloud():
         return jsonify(
             {
                 "ok": True,
@@ -678,7 +690,7 @@ def api_excel_ping():
 def api_excel_reset():
     if request.method == "OPTIONS":
         return Response(status=204)
-    if os.environ.get("VERCEL"):
+    if _is_cloud():
         return jsonify({"ok": False, "error": "Excel転記はローカル起動時のみ利用できます。"}), 501
     try:
         pythoncom, win32 = _import_excel_com()
@@ -702,7 +714,7 @@ def api_excel_reset():
 def api_excel_write():
     if request.method == "OPTIONS":
         return Response(status=204)
-    if os.environ.get("VERCEL"):
+    if _is_cloud():
         return jsonify({"ok": False, "error": "Excel転記はローカル起動時のみ利用できます。"}), 501
 
     data = request.get_json(silent=True) or {}

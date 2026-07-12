@@ -1,0 +1,29 @@
+# Render デプロイ設定（Blueprint）
+# Vercel（サーバーレス）と違い常駐サーバーで動くため、
+# アップロード 4.5MB 上限・実行時間 60秒 上限がなくなり、大きいPDFを変換できる。
+#
+# 使い方:
+#   1. GitHub の PDF2DXF_SEKISAN リポジトリを Render に接続
+#   2. Render ダッシュボードで「New +」→「Blueprint」→ このリポジトリを選択
+#   3. この render.yaml が自動で読み込まれ、Web Service が作成される
+services:
+  - type: web
+    name: pdf2dxf-sekisan
+    runtime: python
+    plan: free            # 512MB / スリープあり（無料）。容量を増やす場合は starter / standard に変更
+    region: singapore     # 日本に近いリージョン
+    branch: main
+    autoDeploy: true      # main への push で自動再デプロイ
+    buildCommand: pip install -r requirements.txt
+    # workers=1 / threads=2: メモリ512MBに収めるため（大きいPDF変換はメモリを使う）
+    # timeout=600: 大きいPDFの変換が60秒を超えても打ち切らない
+    startCommand: gunicorn web_pdf2dxf_app:app --workers 1 --threads 2 --timeout 600 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      # アップロード上限（MB）。Vercelの4.5MB上限は無くなる。必要に応じて増減可。
+      - key: MAX_UPLOAD_MB
+        value: "150"
+      # ジョブ一時ファイルの置き場（Renderの書き込み可能な /tmp を使う）
+      - key: PDF2DXF_WORK_DIR
+        value: "/tmp/pdf2dxf_web"
