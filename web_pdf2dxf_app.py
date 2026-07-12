@@ -101,9 +101,16 @@ input[type=file]{display:none}
 .setting-tile{height:42px;border:1px solid var(--edge);background:var(--panel-2);color:var(--ink);border-radius:8px;cursor:pointer;display:grid;place-items:center;position:relative;transition:background .15s,border-color .15s,color .15s}
 .setting-tile:hover{border-color:var(--accent);color:var(--accent);background:#f0eeea}
 .setting-tile:has(input:checked){color:#fff;background:var(--accent);border-color:var(--accent)}
+.setting-tile.active{color:#fff;background:var(--accent);border-color:var(--accent)}
 .setting-tile.warn{color:#8a5a00;background:#fff7e7;border-color:#eed39d}
 .setting-tile.warn:has(input:checked){color:#fff;background:var(--accent2);border-color:var(--accent2)}
 .setting-tile input{position:absolute;opacity:0;pointer-events:none}
+@keyframes flashsec{0%{background:var(--accent-soft)}100%{background:transparent}}
+.section.flash{animation:flashsec 1.25s ease}
+.scale-cell.on{border-color:var(--accent);box-shadow:0 0 0 2px rgba(90,140,110,.15)}
+.mode-pill{padding:2px 8px;border-radius:4px;font-size:10px;font-family:var(--mono);font-weight:600}
+.mode-pill.auto{background:var(--accent-soft);color:var(--accent)}
+.mode-pill.manual{background:var(--accent2);color:#fff}
 .setting-tile svg,.icon-btn svg,.drop svg,.brand-mark svg,.btn svg,.menu-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .hint-line{margin-top:9px;color:var(--muted);font-size:11px;line-height:1.5}
 .scale-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -171,12 +178,12 @@ iframe{border:0;width:100%;flex:1 1 auto;min-height:0;background:#0b0f14}
       <section class="section">
         <div class="label">変換設定 <span class="pill">自動</span></div>
         <div class="icon-grid">
-          <label class="setting-tile" title="寸法値から縮尺を自動推定"><input type="checkbox" id="autoScale" checked><svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M6 19V5"/><path d="M6 5h12"/><path d="M10 8h2"/><path d="M15 8h2"/><path d="M10 12h2"/><path d="M15 12h2"/></svg></label>
+          <label class="setting-tile" id="autoScaleTile" title="寸法値から縮尺を自動推定（自動モード）"><input type="checkbox" id="autoScale" checked><svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M6 19V5"/><path d="M6 5h12"/><path d="M10 8h2"/><path d="M15 8h2"/><path d="M10 12h2"/><path d="M15 12h2"/></svg></label>
           <button type="button" class="setting-tile" title="変換ページ" onclick="document.getElementById('page').focus()"><svg viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v5h5"/><path d="M10 13h6"/><path d="M10 17h4"/></svg></button>
           <label class="setting-tile warn" title="日本語をOCRで補完"><input type="checkbox" id="ocr"><svg viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg></label>
-          <button type="button" class="setting-tile" title="手動縮尺" onclick="autoScale.checked=false;syncScaleInputs();scaleX.focus()"><svg viewBox="0 0 24 24"><path d="M4 17l6-6 4 4 6-8"/><path d="M14 7h6v6"/></svg></button>
+          <button type="button" class="setting-tile" id="manualScaleBtn" title="手動で縮尺を入力（手動モードに切替）" onclick="toggleManualScale()"><svg viewBox="0 0 24 24"><path d="M4 17l6-6 4 4 6-8"/><path d="M14 7h6v6"/></svg></button>
         </div>
-        <div class="hint-line">OCRは必要な時だけ。通常は縮尺自動推定でそのまま変換。</div>
+        <div class="hint-line">左の定規=自動 / 右の折れ線=手動。手動を押すと下の「縮尺」欄に数値を入力できます。</div>
       </section>
 
       <section class="section">
@@ -184,11 +191,11 @@ iframe{border:0;width:100%;flex:1 1 auto;min-height:0;background:#0b0f14}
         <input id="page" type="number" min="1" step="1" value="1">
       </section>
 
-      <section class="section">
-        <div class="label">縮尺 mm/pt</div>
+      <section class="section" id="scaleSection">
+        <div class="label">縮尺 mm/pt <span class="mode-pill auto" id="scaleMode">自動</span></div>
         <div class="scale-grid">
-          <label class="scale-cell"><span>X方向</span><input id="scaleX" type="text" placeholder="自動推定後に表示" disabled></label>
-          <label class="scale-cell"><span>Y方向</span><input id="scaleY" type="text" placeholder="自動推定後に表示" disabled></label>
+          <label class="scale-cell" id="scaleCellX"><span>X方向</span><input id="scaleX" type="text" placeholder="自動推定後に表示" disabled></label>
+          <label class="scale-cell" id="scaleCellY"><span>Y方向</span><input id="scaleY" type="text" placeholder="自動推定後に表示" disabled></label>
         </div>
         <div id="scaleHint" style="display:none;margin-top:6px;font-size:12px;color:#4b5563;line-height:1.5">式も使えます（例: 96.5*1000/1036）</div>
       </section>
@@ -306,13 +313,44 @@ function updateScalePreview(){
   });
   scaleHint.textContent = out.length ? ('計算結果 → '+out.join('   /   ')) : '式も使えます（例: 96.5*1000/1036）';
 }
+let lastAutoScale='';
 function syncScaleInputs(){
-  const ph = autoScale.checked ? '自動推定後に表示' : '例: 25 または 96.5*1000/1036';
-  scaleX.disabled=autoScale.checked;
-  scaleY.disabled=autoScale.checked;
+  const manual=!autoScale.checked;
+  const ph = manual ? '例: 25 または 96.5*1000/1036' : '自動推定後に表示';
+  scaleX.disabled=!manual;
+  scaleY.disabled=!manual;
   scaleX.placeholder=ph;
   scaleY.placeholder=ph;
+  // モードの見た目を全部そろえる（ボタンのハイライト・バッジ・入力枠の強調）
+  const manualBtn=document.getElementById('manualScaleBtn');
+  const autoTile=document.getElementById('autoScaleTile');
+  const badge=document.getElementById('scaleMode');
+  if(manualBtn) manualBtn.classList.toggle('active', manual);
+  if(autoTile) autoTile.classList.toggle('active', !manual);
+  document.getElementById('scaleCellX').classList.toggle('on', manual);
+  document.getElementById('scaleCellY').classList.toggle('on', manual);
+  if(badge){
+    badge.textContent = manual ? '手動入力' : '自動';
+    badge.className = 'mode-pill '+(manual?'manual':'auto');
+  }
   updateScalePreview();
+}
+// 「手動縮尺」ボタン: 手動⇔自動をトグルし、下の縮尺欄へスクロール＋点滅で気づかせる
+function toggleManualScale(){
+  const goManual = autoScale.checked; // 今が自動なら手動へ
+  autoScale.checked = !goManual;
+  if(goManual){
+    // 手動に入るとき、空なら直前の自動推定値を初期値として入れておく（すぐ変換できるように）
+    if(!scaleX.value && lastAutoScale) scaleX.value=lastAutoScale;
+    if(!scaleY.value && lastAutoScale) scaleY.value=lastAutoScale;
+  }
+  syncScaleInputs();
+  if(!autoScale.checked){
+    const sec=document.getElementById('scaleSection');
+    sec.scrollIntoView({behavior:'smooth', block:'center'});
+    sec.classList.remove('flash'); void sec.offsetWidth; sec.classList.add('flash');
+    setTimeout(()=>scaleX.focus(), 250);
+  }
 }
 scaleX.addEventListener('input', updateScalePreview);
 scaleY.addEventListener('input', updateScalePreview);
@@ -321,6 +359,15 @@ syncScaleInputs();
 
 convertBtn.addEventListener('click', async ()=>{
   if(!selectedFile) return;
+  // 手動モードなのに縮尺が空 → 変換前にその場で気づかせる（従来はサーバーまで行ってエラーだった）
+  if(!autoScale.checked && !(scaleX.value||'').trim() && !(scaleY.value||'').trim()){
+    setStatus('手動モードです。下の「縮尺 mm/pt」欄にX方向（必要ならY方向）の数値を入力してください。例: 25', true);
+    const sec=document.getElementById('scaleSection');
+    sec.scrollIntoView({behavior:'smooth', block:'center'});
+    sec.classList.remove('flash'); void sec.offsetWidth; sec.classList.add('flash');
+    scaleX.focus();
+    return;
+  }
   const origLabel=convertBtn.innerHTML;
   const progress=document.getElementById('progress');
   convertBtn.disabled=true;
@@ -349,6 +396,7 @@ convertBtn.addEventListener('click', async ()=>{
     if(!res.ok || !data.ok) throw new Error(data.error || '変換に失敗しました。');
     if(data.scale_x) scaleX.value=data.scale_x;
     if(data.scale_y) scaleY.value=data.scale_y;
+    if(data.scale_x) lastAutoScale=data.scale_x; // 次に手動へ切替えたときの初期値に使う
     lastDxfB64=data.dxf_b64;
     lastDxfName=data.output_name;
     viewer.src='/viewer/';
