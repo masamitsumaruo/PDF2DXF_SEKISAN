@@ -123,6 +123,7 @@
     padding:0;border-radius:7px;display:grid;place-items:center;cursor:pointer;transition:border-color .12s,color .12s,background .12s}
   .tbtn:hover{border-color:var(--accent);color:var(--accent);background:#f0eeea}
   .tbtn.on{border-color:var(--accent);color:#fff;background:var(--accent)}
+  #btn-hojyo:not(.on):not(:hover) svg{stroke:#00a6cc}
   .tbtn.iconbtn{display:grid;place-items:center;padding:0}
   .tbtn svg, button.tool svg, .bgswitch button svg{width:20px;height:20px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .excel-dir,.bg-toggle{display:inline-flex;gap:4px;align-items:center}
@@ -229,6 +230,7 @@
     <div class="tool-group">
       <button class="tbtn" id="btn-line-red" title="赤連続線"><svg viewBox="0 0 24 24"><path d="M4 18l5-8 5 4 6-9"/></svg></button>
       <button class="tbtn" id="btn-line-single" title="赤単線"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></button>
+      <button class="tbtn" id="btn-hojyo" title="補助線（水色・水平/垂直、Shiftで自由）" style="display:none"><svg viewBox="0 0 24 24"><path d="M6 18L18 6"/><rect x="3" y="15" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/></svg></button>
       <button class="tbtn" id="btn-calc-area" title="周長面積"><svg viewBox="0 0 24 24"><path d="M5 8l7-4 7 4v8l-7 4-7-4z"/><path d="M5 8l7 4 7-4"/></svg></button>
       <button class="tbtn" id="btn-line-del" title="赤線削除"><svg viewBox="0 0 24 24"><path d="M13 5l6 6-7 7H6l-2-2z"/><path d="M8.5 20H20"/></svg></button>
       <button class="tbtn" id="btn-dim-xy" title="寸法 X/Y"><svg viewBox="0 0 24 24"><path d="M4 17h16"/><path d="M7 14l-3 3 3 3"/><path d="M17 14l3 3-3 3"/><path d="M6 7h12"/><path d="M6 4v6"/><path d="M18 4v6"/></svg></button>
@@ -761,6 +763,12 @@ const SUNPOU_ACI = '2';  // 黄色
 const LINE_LAYER = 'LINE';
 const LINE_ACI = '30';
 const LINE_COLOR = {r:255,g:165,b:0};
+// 補助線（EXE版のみ）: レイヤ hojyo / 水色(シアン) / DXF ACI=4
+const HOJYO_LAYER = 'hojyo';
+const HOJYO_ACI = '4';
+const HOJYO_COLOR = {r:0,g:191,b:255};   // #00BFFF
+const HOJYO_COLOR_CSS = '#00bfff';
+let shiftHeld = false;                    // Shift押下中=補助線を自由角度で引く
 
 // 解決済みRGB({r,g,b})を背景に応じて可視化しCSS色文字列に変換
 function rgbCss(c){
@@ -1021,6 +1029,20 @@ function buildDim(p1,p2,anchor){
 }
 // スナップせず素の世界座標を返す（引き出し位置の自由指定用）
 function freeAt(px,py){ return { x:(px-view.ox)/view.scale, y:(view.oy-py)/view.scale, snapped:false, type:null }; }
+// 補助線の点を決める。端点・交点等にスナップできればそれを優先（四角表示）、
+// なければ何もない位置に配置。2点目は前点から水平/垂直に拘束（Shift押下時のみ自由）。
+function hojyoPoint(px,py){
+  const s=snapAt(px,py);
+  if(s.snapped) return s;                              // 端点/交点/その他にスナップ（緑四角）
+  const wx=(px-view.ox)/view.scale, wy=(view.oy-py)/view.scale;
+  const prev = pend.length===1 ? pend[0] : null;
+  if(prev && !shiftHeld){                              // 2点目: 水平/垂直に拘束
+    const dx=wx-prev.x, dy=wy-prev.y;
+    if(Math.abs(dx)>=Math.abs(dy)) return { x:wx, y:prev.y, snapped:false, type:null };  // 水平
+    return { x:prev.x, y:wy, snapped:false, type:null };                                 // 垂直
+  }
+  return { x:wx, y:wy, snapped:false, type:null };     // 1点目 or Shift=自由
+}
 
 function ovSeg(p,q){ const A=w2s(p.x,p.y), B=w2s(q.x,q.y); octx.beginPath(); octx.moveTo(A[0],A[1]); octx.lineTo(B[0],B[1]); octx.stroke(); }
 function extLine(fp,lp){   // 補助線（基点に小隙間、寸法線側に少し突出）
@@ -1096,11 +1118,11 @@ function drawBaseline(p1,p2){
   octx.beginPath(); octx.moveTo(A[0],A[1]); octx.lineTo(B[0],B[1]); octx.stroke();
   octx.restore();
 }
-function drawUserLine(line, preview){
+function drawUserLine(line, preview, colorCss){
   const A=w2s(line.p1.x,line.p1.y), B=w2s(line.p2.x,line.p2.y);
   const dpr=cv.width/cv.getBoundingClientRect().width;
   octx.save();
-  octx.strokeStyle='#ff2b2b';
+  octx.strokeStyle=colorCss||'#ff2b2b';
   octx.lineWidth=Math.max(2, 2*dpr);
   octx.setLineDash(preview?[8*dpr,5*dpr]:[]);
   octx.globalAlpha=preview?0.82:1;
@@ -1116,7 +1138,8 @@ function drawOverlay(){
   octx.lineCap='round'; octx.lineJoin='round';
   dims.forEach(d=>drawDim(d,false));
   if(toolMode && hover){
-    if((toolMode==='line'||toolMode==='single-line') && pend.length===1 && hover.snapped) drawUserLine({p1:pend[0],p2:hover}, true);
+    if(toolMode==='hojyo' && pend.length===1) drawUserLine({p1:pend[0],p2:hover}, true, HOJYO_COLOR_CSS);  // 補助線プレビュー（未スナップでも表示）
+    else if((toolMode==='line'||toolMode==='single-line') && pend.length===1 && hover.snapped) drawUserLine({p1:pend[0],p2:hover}, true);
     else if(pend.length===1) drawBaseline(pend[0], hover);                    // 両端を決める仮線
     else if(pend.length===2){ const pv=buildDim(pend[0],pend[1],{x:hover.x,y:hover.y}); if(pv) drawDim(pv,true); } // 引き出しプレビュー
   }
@@ -1170,11 +1193,13 @@ function drawPencilCursor(px, py, dpr){
 }
 function updReadout(){
   const el=document.getElementById('dim-readout'); if(!el) return;
-  const mode = excelMode ? 'Excel転記' : toolMode==='line' ? '赤連続線' : toolMode==='single-line' ? '赤単線' : toolMode==='text-move' ? 'テキスト移動' : toolMode==='xy' ? 'X/Y（水平・垂直）' : toolMode==='diag' ? '斜め' : 'オフ';
+  const mode = excelMode ? 'Excel転記' : toolMode==='line' ? '赤連続線' : toolMode==='single-line' ? '赤単線' : toolMode==='hojyo' ? '補助線（水色）' : toolMode==='text-move' ? 'テキスト移動' : toolMode==='xy' ? 'X/Y（水平・垂直）' : toolMode==='diag' ? '斜め' : 'オフ';
   const step = excelMode ? '転記する文字・数字をクリック'
     : !toolMode ? '寸法ボタンで開始'
     : toolMode==='text-move' && !textMoveTarget ? '移動するテキストをクリック'
     : toolMode==='text-move' && textMoveTarget ? '移動先をクリック'
+    : toolMode==='hojyo' && pend.length===0 ? '始点を指定（端点/交点は四角で吸着）'
+    : toolMode==='hojyo' && pend.length===1 ? '次の点（水平/垂直・Shiftで自由）'
     : (toolMode==='line'||toolMode==='single-line') && pend.length===0 ? '始点（交点・端点）を指定'
     : (toolMode==='line'||toolMode==='single-line') && pend.length===1 ? '次の点（交点・端点）を指定'
     : pend.length===0 ? '1点目を指定'
@@ -1190,9 +1215,10 @@ function setTool(m){
   pend=[]; hover=null; textMoveTarget=null;
   const bl=document.getElementById('btn-line-red'), bx=document.getElementById('btn-dim-xy'), bd=document.getElementById('btn-dim-diag');
   const bld=document.getElementById('btn-line-del'), bls=document.getElementById('btn-line-single');
-  const btm=document.getElementById('btn-text-move');
+  const btm=document.getElementById('btn-text-move'), bhj=document.getElementById('btn-hojyo');
   if(bl) bl.classList.toggle('on', toolMode==='line');
   if(bls) bls.classList.toggle('on', toolMode==='single-line');
+  if(bhj) bhj.classList.toggle('on', toolMode==='hojyo');
   if(bx) bx.classList.toggle('on', toolMode==='xy');
   if(bd) bd.classList.toggle('on', toolMode==='diag');
   if(bld) bld.classList.toggle('on', toolMode==='line-del');
@@ -1220,7 +1246,7 @@ function handleLineDelClick(px,py){
   removeSekisanLine(line);
   // actionHistoryからも削除
   for(let i=actionHistory.length-1;i>=0;i--){
-    if((actionHistory[i].type==='line'||actionHistory[i].type==='single-line') && actionHistory[i].p1 && Math.hypot(actionHistory[i].p1.x-line.p1.x,actionHistory[i].p1.y-line.p1.y)<1e-6 && Math.hypot(actionHistory[i].p2.x-line.p2.x,actionHistory[i].p2.y-line.p2.y)<1e-6){
+    if((actionHistory[i].type==='line'||actionHistory[i].type==='single-line'||actionHistory[i].type==='hojyo') && actionHistory[i].p1 && Math.hypot(actionHistory[i].p1.x-line.p1.x,actionHistory[i].p1.y-line.p1.y)<1e-6 && Math.hypot(actionHistory[i].p2.x-line.p2.x,actionHistory[i].p2.y-line.p2.y)<1e-6){
       actionHistory.splice(i,1); break;
     }
   }
@@ -1270,6 +1296,19 @@ function addSekisanLine(p1,p2){
   buildSnap(DOC);
   return ent;
 }
+// 補助線を hojyo レイヤ・水色で追加（EXE版のみ利用）
+function addHojyoLine(p1,p2){
+  if(!DOC) return null;
+  if(!DOC.usedLayers) DOC.usedLayers={};
+  const isNewLayer=!DOC.sen.some(e=>e.layer===HOJYO_LAYER);
+  const ent={x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, layer:HOJYO_LAYER, col:HOJYO_COLOR, dash:[], userLine:true, hojyo:true};
+  DOC.sen.push(ent);
+  if(isNewLayer) buildLayerModal(DOC);
+  DOC.usedLayers[HOJYO_LAYER]=(DOC.usedLayers[HOJYO_LAYER]||0)+1;
+  bbox=computeBBox(DOC);
+  buildSnap(DOC);
+  return ent;
+}
 function formatMeters(v){
   if(!isFinite(v)||v<0.01) return '0.00';
   return v.toFixed(2);
@@ -1301,9 +1340,10 @@ function addSingleLineLabel(p1,p2){
 function removeSekisanLine(line){
   if(!DOC || !line) return;
   if(line.ent){
+    const lyr=line.ent.layer||SEKISAN_LAYER;   // 赤線=SEKISAN / 補助線=hojyo
     const idx=DOC.sen.indexOf(line.ent);
     if(idx>=0) DOC.sen.splice(idx,1);
-    if(DOC.usedLayers && DOC.usedLayers[SEKISAN_LAYER]) DOC.usedLayers[SEKISAN_LAYER]=Math.max(0, DOC.usedLayers[SEKISAN_LAYER]-1);
+    if(DOC.usedLayers && DOC.usedLayers[lyr]) DOC.usedLayers[lyr]=Math.max(0, DOC.usedLayers[lyr]-1);
   }
   if(line.labelEnt){
     const idx=DOC.moji.indexOf(line.labelEnt);
@@ -1312,7 +1352,7 @@ function removeSekisanLine(line){
   }
   bbox=computeBBox(DOC);
   buildSnap(DOC);
-  if(!DOC.sen.some(e=>e.layer===SEKISAN_LAYER)) buildLayerModal(DOC);
+  if(!DOC.sen.some(e=>e.layer===SEKISAN_LAYER) || !DOC.sen.some(e=>e.layer===HOJYO_LAYER)) buildLayerModal(DOC);
 }
 let clearAllSnapshot=null;
 function clearUserAnnotations(saveSnapshot){
@@ -1330,6 +1370,7 @@ function clearUserAnnotations(saveSnapshot){
     if(DOC.usedLayers) delete DOC.usedLayers[SEKISAN_LAYER];
     if(DOC.usedLayers) delete DOC.usedLayers[MOJI_LAYER];
     if(DOC.usedLayers) delete DOC.usedLayers[LINE_LAYER];
+    if(DOC.usedLayers) delete DOC.usedLayers[HOJYO_LAYER];
     bbox=computeBBox(DOC);
     buildSnap(DOC);
     buildLayerModal(DOC);
@@ -1613,7 +1654,7 @@ function undoLastAction(){
   const act=actionHistory.pop();
   if(act && act.type==='clear-all'){
     restoreFromClearAll();
-  }else if(act && (act.type==='line'||act.type==='single-line') && userLines.length){
+  }else if(act && (act.type==='line'||act.type==='single-line'||act.type==='hojyo') && userLines.length){
     removeSekisanLine(userLines.pop());
   }else if(act && act.type==='measure'){
     clearMeasureLabels();
@@ -1637,6 +1678,24 @@ function undoLastAction(){
   draw();
 }
 function placePoint(px,py){
+  if(toolMode==='hojyo'){
+    const s=hojyoPoint(px,py);                 // 端点/交点スナップ優先、無ければ水平垂直（Shiftで自由）
+    const p={x:s.x, y:s.y};
+    if(pend.length===0){
+      pend=[p];
+    }else{
+      const p1=pend[0], p2=p;
+      if(Math.hypot(p2.x-p1.x, p2.y-p1.y)>1e-9){
+        const line={p1:{x:p1.x, y:p1.y}, p2:{x:p2.x, y:p2.y}, ent:null, labelEnt:null, hojyo:true};
+        line.ent=addHojyoLine(line.p1, line.p2);
+        userLines.push(line);
+        actionHistory.push({type:'hojyo', p1:line.p1, p2:line.p2});
+      }
+      pend=[];                                  // 単線: 1本確定ごとにリセット
+    }
+    hover=s; updReadout(); draw();
+    return;
+  }
   if(toolMode==='line'||toolMode==='single-line'){
     const s=snapAt(px,py);
     if(!s.snapped){ hover=s; updReadout(); drawOverlay(); return; }
@@ -1908,6 +1967,17 @@ document.getElementById('btn-excel').onclick=()=>setExcelMode(!excelMode);
 document.getElementById('btn-line-red').onclick=()=>setTool('line');
 document.getElementById('btn-line-single').onclick=()=>setTool('single-line');
 document.getElementById('btn-line-del').onclick=()=>setTool('line-del');
+// 補助線ツール（EXE版のみ表示）。EXE=デスクトップアプリ(pywebview / ポート5055配信)でのみ有効化。
+(function(){
+  const bh=document.getElementById('btn-hojyo'); if(!bh) return;
+  bh.onclick=()=>setTool('hojyo');
+  const showIfDesktop=()=>{ if(location.port==='5055' || window.pywebview) bh.style.display=''; };
+  showIfDesktop();
+  window.addEventListener('pywebviewready', showIfDesktop);   // pywebview注入が遅延する場合の保険
+  // Shift押下中は補助線を自由角度で。プレビューも即時追従。
+  window.addEventListener('keydown',e=>{ if(e.key==='Shift' && !shiftHeld){ shiftHeld=true; if(toolMode==='hojyo') drawOverlay(); } });
+  window.addEventListener('keyup',  e=>{ if(e.key==='Shift' && shiftHeld){ shiftHeld=false; if(toolMode==='hojyo') drawOverlay(); } });
+})();
 document.getElementById('btn-calc-area').onclick=calcSekisanMeasures;
 document.getElementById('btn-dim-xy').onclick=()=>setTool('xy');
 document.getElementById('btn-dim-diag').onclick=()=>setTool('diag');
@@ -2009,6 +2079,7 @@ function buildLayerInsert(rows,nl){
   if(measureLabels.length && !hasLayer(rows, MOJI_LAYER)) out += layerRecord(MOJI_LAYER,MOJI_ACI,nl);
   if(dims.length && !hasLayer(rows, SUNPOU_LAYER)) out += layerRecord(SUNPOU_LAYER,SUNPOU_ACI,nl);
   if(DOC && DOC.moji.some(e=>e.singleLineLabel) && !hasLayer(rows, LINE_LAYER)) out += layerRecord(LINE_LAYER,LINE_ACI,nl);
+  if(DOC && DOC.sen.some(e=>e.hojyo) && !hasLayer(rows, HOJYO_LAYER)) out += layerRecord(HOJYO_LAYER,HOJYO_ACI,nl);
   return out;
 }
 function buildMeasureTextDxfRecords(nl){
@@ -2109,8 +2180,8 @@ function buildSekisanDxfBytes(){
   if(userLines.length){
     ents+=userLines.map(line=>[
       '0','LINE',
-      '8',SEKISAN_LAYER,
-      '62','1',
+      '8', line.hojyo ? HOJYO_LAYER : SEKISAN_LAYER,   // 補助線=hojyo / 赤線=SEKISAN
+      '62', line.hojyo ? HOJYO_ACI : '1',
       '6','CONTINUOUS',
       '10',dxfNum(line.p1.x),
       '20',dxfNum(line.p1.y),
@@ -2349,7 +2420,7 @@ window.addEventListener('mouseup',e=>{
   if(dragging && DOC && excelMode && !downMoved){ const [px,py]=toCanvas(e.clientX,e.clientY); handleExcelClick(px,py); }
   else if(dragging && DOC && toolMode==='line-del' && !downMoved){ const [px,py]=toCanvas(e.clientX,e.clientY); handleLineDelClick(px,py); }
   else if(dragging && DOC && toolMode==='text-move' && !downMoved){ const [px,py]=toCanvas(e.clientX,e.clientY); handleTextMoveClick(px,py); }
-  else if(dragging && DOC && (toolMode==='line'||toolMode==='single-line'||toolMode==='xy'||toolMode==='diag') && !downMoved){ const [px,py]=toCanvas(e.clientX,e.clientY); placePoint(px,py); }
+  else if(dragging && DOC && (toolMode==='line'||toolMode==='single-line'||toolMode==='hojyo'||toolMode==='xy'||toolMode==='diag') && !downMoved){ const [px,py]=toCanvas(e.clientX,e.clientY); placePoint(px,py); }
   dragging=false;
 });
 window.addEventListener('mousemove',e=>{ if(!DOC)return;
@@ -2375,9 +2446,9 @@ window.addEventListener('mousemove',e=>{ if(!DOC)return;
   if(excelMode){
     const [px,py]=toCanvas(e.clientX,e.clientY);
     cv.style.cursor=textHitAt(px,py)?'copy':'default';
-  }else if(toolMode==='line'||toolMode==='single-line'||toolMode==='xy'||toolMode==='diag'){
+  }else if(toolMode==='line'||toolMode==='single-line'||toolMode==='hojyo'||toolMode==='xy'||toolMode==='diag'){
     const [px,py]=toCanvas(e.clientX,e.clientY);
-    hover=(toolMode==='line'||toolMode==='single-line'||pend.length<2)?snapAt(px,py):freeAt(px,py);
+    hover=toolMode==='hojyo'?hojyoPoint(px,py):(toolMode==='line'||toolMode==='single-line'||pend.length<2)?snapAt(px,py):freeAt(px,py);
     drawOverlay();
   }
 });
@@ -2395,7 +2466,7 @@ function aimPoint(t){                    // 点指定のプレビュー（スナ
   ptLast={clientX:t.clientX, clientY:t.clientY};
   pencilPos=[px,py];
   if(excelMode){ cv.style.cursor=textHitAt(px,py)?'copy':'default'; }
-  else if(toolMode){ hover=(toolMode==='line'||toolMode==='single-line'||pend.length<2)?snapAt(px,py):freeAt(px,py); }
+  else if(toolMode){ hover=toolMode==='hojyo'?hojyoPoint(px,py):(toolMode==='line'||toolMode==='single-line'||pend.length<2)?snapAt(px,py):freeAt(px,py); }
   drawOverlay();
 }
 function startSingle(t){
